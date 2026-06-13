@@ -15,6 +15,11 @@ const GROQ_API_KEYS = [
   process.env.GROQ_API_KEY_9,
   process.env.GROQ_API_KEY_10,
   process.env.GROQ_API_KEY_11,
+  process.env.GROQ_API_KEY_12,
+  process.env.GROQ_API_KEY_13,
+  process.env.GROQ_API_KEY_14,
+  process.env.GROQ_API_KEY_15,
+  process.env.GROQ_API_KEY_16,
 ].filter(Boolean) as string[]
 
 let currentKeyIndex = 0
