@@ -124,6 +124,8 @@ export default function Chatbot() {
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0 })
 
   const listRef = useRef<HTMLDivElement>(null)
+  const chatRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const promptTimer = useRef<ReturnType<typeof setInterval>>(undefined as any)
 
   useEffect(() => {
@@ -137,7 +139,7 @@ export default function Chatbot() {
       posInitialized.current = true
       setChatPos({
         x: Math.max(8, (window.innerWidth - 480) / 2),
-        y: Math.max(8, window.innerHeight - 580 - 60),
+        y: Math.max(8, window.innerHeight - 580 - 130),
       })
     }
   }, [])
@@ -161,6 +163,22 @@ export default function Chatbot() {
 
   useEffect(() => {
     if (open) setShowPrompt(false)
+  }, [open])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        open &&
+        chatRef.current &&
+        !chatRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
   const handleDragStart = useCallback((clientX: number, clientY: number) => {
@@ -241,9 +259,12 @@ export default function Chatbot() {
 
       {/* Periodic "Ask me anything" prompt */}
       {!open && showPrompt && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[199] animate-pulse">
-          <div className="bg-[#e8702a] text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg flex items-center gap-2 whitespace-nowrap">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div
+          className="fixed bottom-44 left-1/2 -translate-x-1/2 z-[199] animate-bounce cursor-pointer"
+          onClick={() => setOpen(true)}
+        >
+          <div className="bg-[#e8702a] text-white text-sm font-medium px-5 py-3 rounded-full shadow-lg flex items-center gap-2 whitespace-nowrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             Ask me anything!
@@ -254,6 +275,7 @@ export default function Chatbot() {
       {/* Draggable chat window */}
       {open && (
         <div
+          ref={chatRef}
           className="fixed z-[200] w-[480px] max-w-[calc(100vw-16px)] h-[580px] max-h-[calc(100vh-16px)] bg-zinc-900 border border-white/20 rounded-2xl flex flex-col shadow-2xl overflow-hidden"
           style={{ left: chatPos.x, top: chatPos.y }}
         >
@@ -333,19 +355,14 @@ export default function Chatbot() {
       {/* Chat button */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200]">
         <button
+          ref={buttonRef}
           onClick={() => setOpen(o => !o)}
-          className="bg-[#e8702a] hover:bg-[#d2611f] text-white rounded-full p-5 shadow-lg transition-all hover:scale-110 active:scale-95"
+          className="bg-[#e8702a] hover:bg-[#d2611f] text-white rounded-full w-16 h-16 flex items-center justify-center shadow-lg shadow-[#e8702a]/30 transition-all hover:scale-110 active:scale-95"
           aria-label="Toggle AI assistant"
         >
-          {open ? (
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          ) : (
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          )}
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
         </button>
       </div>
     </>

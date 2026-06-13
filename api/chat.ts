@@ -1,7 +1,29 @@
 /// <reference types="node" />
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
+
+const GROQ_API_KEYS = [
+  process.env.GROQ_API_KEY_0,
+  process.env.GROQ_API_KEY_1,
+  process.env.GROQ_API_KEY_2,
+  process.env.GROQ_API_KEY_3,
+  process.env.GROQ_API_KEY_4,
+  process.env.GROQ_API_KEY_5,
+  process.env.GROQ_API_KEY_6,
+  process.env.GROQ_API_KEY_7,
+  process.env.GROQ_API_KEY_8,
+  process.env.GROQ_API_KEY_9,
+  process.env.GROQ_API_KEY_10,
+  process.env.GROQ_API_KEY_11,
+].filter(Boolean) as string[]
+
+let currentKeyIndex = 0
+
+function getNextKey(): string {
+  const key = GROQ_API_KEYS[currentKeyIndex % GROQ_API_KEYS.length]
+  currentKeyIndex++
+  return key
+}
 
 const MODELS = {
   'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B', provider: 'Meta' },
@@ -28,6 +50,28 @@ const MAINFRAME_KEYWORDS = [
   'mainframe console', 'mainframe operator', 'mainframe programmer',
   'mainframe administrator', 'mainframe architect',
   '390', 'system/390', 's/390',
+  'dump', 'redact', 'idis', 'ipcs', 'smp/e', 'z/os upgrade',
+  'catalog', 'alias', 'idcams', 'access method', 'bldx', 'acb',
+  'repro', 'export', 'import', 'define cluster',
+  'operator', 'display', 'vary', 'cancel', 'start', 'stop', 'modify',
+  'mount', 'force', 'sweep', 'quiesce', 'drain', 'purge', 'hold',
+  'release', 'restart', 'interrupt', 'switch', 'format', 'activate',
+  'deactivate', 'refresh', 'route', 'send', 'message', 'reply',
+  'initiator', 'printer', 'spool', 'node', 'remote', 'line',
+  'form', 'class', 'queue', 'output', 'joblog', 'syslog',
+  'omvs', 'uss', 'unix', 'zfs', 'filesystem', 'mountpoint',
+  'parmlib', 'proclib', 'lkledit', 'linklist', 'apf', 'exits',
+  'program', 'transaction', 'region', 'database', 'table',
+  'buffer', 'thread', 'utility', 'image', 'copy', 'backup',
+  'recovery', 'log', 'checkpoint', 'restart', 'shutdown',
+  'connect', 'disconnect', 'acquire', 'trace', 'snap',
+  'password', 'userid', 'group', 'profile', 'permit', 'define',
+  'alter', 'delete', 'connect', 'remove', 'list', 'search',
+  'dataset', 'dsn', 'member', 'pds', 'pdse', 'sequential',
+  'generation', 'gdg', 'catalog', 'vtoc', 'label', 'volume',
+  'unit', 'device', 'path', 'channel', 'online', 'offline',
+  'enable', 'disable', 'activate', 'deactivate', 'allocate',
+  'free', 'mount', 'unmount', 'export', 'import',
 ]
 
 function isMainframeQuery(query: string): boolean {
@@ -35,182 +79,18 @@ function isMainframeQuery(query: string): boolean {
   return MAINFRAME_KEYWORDS.some(kw => lower.includes(kw))
 }
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&[^;]+;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-async function searchDuckDuckGo(query: string): Promise<{ title: string; snippet: string; url: string }[]> {
-  try {
-    const res = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json()
-    const results: { title: string; snippet: string; url: string }[] = []
-
-    if (data.AbstractText && data.AbstractURL) {
-      results.push({
-        title: data.AbstractSource ?? 'Wikipedia',
-        snippet: data.AbstractText.slice(0, 300),
-        url: data.AbstractURL,
-      })
-    }
-
-    const topics = data.RelatedTopics ?? []
-    for (const topic of topics) {
-      if (results.length >= 5) break
-      if (topic.Text && topic.FirstURL) {
-        results.push({
-          title: topic.Text.split(' - ')[0] ?? topic.Text.slice(0, 80),
-          snippet: topic.Text.slice(0, 300),
-          url: topic.FirstURL,
-        })
-      }
-      if (topic.Topics) {
-        for (const sub of topic.Topics) {
-          if (results.length >= 5) break
-          if (sub.Text && sub.FirstURL) {
-            results.push({
-              title: sub.Text.split(' - ')[0] ?? sub.Text.slice(0, 80),
-              snippet: sub.Text.slice(0, 300),
-              url: sub.FirstURL,
-            })
-          }
-        }
-      }
-    }
-    return results
-  } catch {
-    return []
-  }
-}
-
-async function searchWikipedia(query: string): Promise<{ title: string; snippet: string; url: string }[]> {
-  try {
-    const res = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=5&srprop=snippet`,
-      { headers: { 'User-Agent': 'MainframeBot/1.0' } },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json()
-    return (data.query?.search ?? []).map((r: any) => ({
-      title: r.title,
-      snippet: r.snippet.replace(/<[^>]+>/g, '').slice(0, 300),
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`,
-    }))
-  } catch {
-    return []
-  }
-}
-
-async function searchDuckDuckGoSite(query: string, site: string): Promise<{ title: string; snippet: string; url: string }[]> {
-  try {
-    const res = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(`site:${site} ${query}`)}&format=json&no_html=1&skip_disambig=1`,
-      { headers: { 'User-Agent': 'Mozilla/5.0' } },
-    )
-    if (!res.ok) return []
-
-    const data = await res.json()
-    const results: { title: string; snippet: string; url: string }[] = []
-
-    if (data.AbstractText && data.AbstractURL) {
-      results.push({
-        title: data.AbstractSource ?? site,
-        snippet: data.AbstractText.slice(0, 300),
-        url: data.AbstractURL,
-      })
-    }
-
-    const topics = data.RelatedTopics ?? []
-    for (const topic of topics) {
-      if (results.length >= 3) break
-      if (topic.Text && topic.FirstURL) {
-        results.push({
-          title: topic.Text.split(' - ')[0] ?? topic.Text.slice(0, 80),
-          snippet: topic.Text.slice(0, 300),
-          url: topic.FirstURL,
-        })
-      }
-    }
-    return results
-  } catch {
-    return []
-  }
-}
-
-async function searchWeb(query: string): Promise<{ title: string; snippet: string; url: string }[]> {
-  const [wiki, ddg, ibmDocs] = await Promise.all([
-    searchWikipedia(query),
-    searchDuckDuckGo(query),
-    searchDuckDuckGoSite(query, 'ibm.com/docs/zos'),
-  ])
-  const seen = new Set<string>()
-  const merged = [...wiki, ...ibmDocs, ...ddg].filter(r => {
-    if (seen.has(r.url)) return false
-    seen.add(r.url)
-    return true
-  })
-  return merged.slice(0, 5)
-}
-
-async function fetchPageContent(url: string): Promise<string> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MainframeBot/1.0)' },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!res.ok) return ''
-    const html = await res.text()
-    const text = stripHtml(html)
-    return text.slice(0, 3000)
-  } catch {
-    return ''
-  }
-}
-
-async function buildSearchContext(query: string): Promise<string> {
-  const results = await searchWeb(query)
-  if (!results.length) return ''
-
-  const parts: string[] = []
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i]
-    parts.push(`Source ${i + 1}: ${r.title}\nURL: ${r.url}\nSummary: ${r.snippet}`)
-    const content = await fetchPageContent(r.url)
-    if (content) {
-      parts.push(`Content: ${content}`)
-    }
-  }
-
-  const ibmRef = await fetchPageContent('https://www.ibm.com/docs/en/zos/2.5.0?topic=commands-mvs-system-reference')
-  if (ibmRef) {
-    parts.push(`\n---\nIBM z/OS Reference Overview:\n${ibmRef}`)
-  }
-
-  return parts.join('\n\n---\n\n')
-}
-
 async function checkRelevance(message: string, model: ModelKey = 'llama-3.1-8b-instant'): Promise<'mainframe' | 'irrelevant' | 'ambiguous'> {
   if (isMainframeQuery(message)) return 'mainframe'
 
-  if (!GROQ_API_KEY) return 'ambiguous'
+  const relevanceKey = getNextKey()
+  if (!relevanceKey) return 'ambiguous'
 
   try {
     const res = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Authorization': `Bearer ${relevanceKey}`,
       },
       body: JSON.stringify({
         model: model,
@@ -235,53 +115,555 @@ async function checkRelevance(message: string, model: ModelKey = 'llama-3.1-8b-i
   }
 }
 
-const WEBSITE_KB = `## Website: Mainframe Knowledge Database (by Vimal)
+const COMMANDS_DB = [
+  ['D A,L','Display active users, started tasks, jobs, regions'],
+  ['D A,<TASK>','Show if specific started task is active'],
+  ['D ASM','Display Auxiliary Storage Manager usage'],
+  ['D C','Display consoles (master and others)'],
+  ['D C,B','Display console buffer'],
+  ['D C,K','Display control command operands list'],
+  ['D C,M','Display Master Console'],
+  ['D C,N','Display inactive consoles'],
+  ['D D','Display dump datasets (SYS1.DUMPxx)'],
+  ['D D,T','Display dump datasets with titles'],
+  ['D DUMP','Display dump dataset status'],
+  ['D ETR','Display External Time Reference status'],
+  ['D GRS,C','Display system contention (Global Resource Serialization)'],
+  ['D IPLINFO','Display current IPL information'],
+  ['D J','Display active jobs'],
+  ['D J,L','Display system activity / active jobs'],
+  ['D OPDATA','Display command prefixes of DB2, JES, RACF regions'],
+  ['D PFK','Display PFK defined commands'],
+  ['D R,L','Display outstanding WTORs'],
+  ['D R,R','Display pending action messages'],
+  ['D R,U','Display devices needing attention/mount requests'],
+  ['D SMF','Display SMF datasets (SYS1.MANx)'],
+  ['D SMF,O','Display current SMF options'],
+  ['D SMF,S','Display SMF status'],
+  ['D T or DT','Display local time, GMT, Julian date'],
+  ['D TS,L','Display active TSO users'],
+  ['D XCF','Display systems in Sysplex'],
+  ['D XCF,COUPLE','Display coupling facility info'],
+  ['D A,L,USERID=<ID>','Display active jobs for specific TSO user'],
+  ['D OMVS','Display if OMVS is active'],
+  ['D OMVS,F','Display mounted file systems'],
+  ['D OMVS,OPTIONS','Display OMVS options'],
+  ['D XCF,STR','List coupling facility structures'],
+  ['D XCF,STRNAME=<NAME>','Display info about individual structure'],
+  ['D SSI','Display configured subsystems'],
+  ['D GRS,RES=(*)','Display viewable resources'],
+  ['D GRS,RES=(SYSDSN)','Display enqueues on SYSDSN'],
+  ['D GRS,E,C','List resource everyone is waiting on'],
+  ['$D PROCLIB','Display system proclib'],
+  ["SE '<msg>'","Send message to all TSO users"],
+  ['D A,<jobname>','Display info for specific job (* wildcard)'],
+  ['D C,*','Display console info for current console'],
+  ['D C,A,CA','Display active sysplex consoles'],
+  ['D C,N,CA','Display inactive sysplex consoles'],
+  ['D GRS,RES(*,<dsn>)','Display contention with specific dataset'],
+  ['D IOS,CONFIG','Display I/O configuration'],
+  ['D J,A','Display detailed active job info'],
+  ['D M=CONFIG(<n>)','Display config deviation'],
+  ['D NET,CPCP','Display CP-CP session status'],
+  ['D R,L,CN=(ALL)','Display outstanding replies from all consoles'],
+  ['D U,DASD,<nnn>,<n>','Display specific DASD unit range'],
+  ['K E,*','Delete line marked with * on console'],
+  ['K E,X,Y','Delete lines X through Y'],
+  ["K N,PFK=(X,CMD='...'),CON=N","Define PFK"],
+  ['K Q','Clear console buffer spool'],
+  ['K Q,L=<CONSOLE ID>','Clear buffer shortage for console ID'],
+  ["K S,DEL=RD","Set Roll Delete Mode"],
+  ['K S,DEL=N','Stop message scrolling'],
+  ['K S,REF','Display current console mode'],
+  ['K V,LEVEL=ALL','Display all message traffic routed to console'],
+  ['K V,LEVEL=I','Display immediate action messages'],
+  ['K V,LEVEL=R','Display WTORs at console'],
+  ['K V,REF','Display all vary definitions'],
+  ['K A,REF','Show areas on operator console'],
+  ['K A,NONE','Remove out of line area from console'],
+  ['K A,14','Make area 14 lines deep'],
+  ['K A,6,6','Make two areas A and B'],
+  ['K D,F','Scroll forward'],
+  ['K E,D','Remove bottom out of line display area'],
+  ['K E','Clear scrolling messages from screen'],
+  ['K E,N','Remove nth message from top'],
+  ["K N,PFK=(001,CMD='d a,l;d ts,l')","Set PF key 001 to multiple commands"],
+  ['K E,SEG','Delete content of message segment'],
+  ['K E,1','Delete line 1 on console'],
+  ['PA1','Retrieve previous command'],
+  ['K K','Clear screen except highlighted messages'],
+  ['K C,A,0-999999999','Clear all messages from console'],
+  ['K D,PFK','Display PFK line'],
+  ['K M,MILM=<n>','Change WTO/WTOR message buffers'],
+  ['K S,DEL=Y','Set console to delete all messages'],
+  ['K S,DEL=R','Set console to roll all messages'],
+  ['K S,RNUM=<n>','Set messages to roll count'],
+  ['K S,RTME=<n>','Set roll interval seconds'],
+  ['K T','Display dynamic display update interval'],
+  ['K T,UTKE,<n>','Update dynamic display every n seconds'],
+  ['V DEV NUM,ONLINE','Vary device online'],
+  ['V DEV NUM,OFFLINE','Vary device offline'],
+  ['V NET,ID=LINE ID,ACT,ALL','Activate network line'],
+  ['V NET,ID=LINE ID,INACT,F','Deactivate network line force'],
+  ['V NET,ID=<ID>,ACT/INACT','Change network resource status'],
+  ['V NET,ID=<ID>,ACT/INACT,SCOPE=ALL/ONLY','Change network resource and subordinates'],
+  ['V PATH(XXX,YY),ONLINE','Vary channel path online'],
+  ['V PATH(XXX,YY),OFFLINE','Vary channel path offline'],
+  ['V SMS,LIB(ATL NAME),ONLINE','Vary ATL online'],
+  ['V SMS,LIB(ATL NAME),OFFLINE','Vary ATL offline'],
+  ['V XXX,ONLINE','Vary tape drive online'],
+  ['V XXX,OFFLINE','Vary tape drive offline'],
+  ['RO *ALL,V XXX,OFFLINE','Vary drive offline across sysplex'],
+  ['RO *ALL,V <addr>,ONLINE','Vary drive online on all sysplex systems'],
+  ['CF CHP(<cc>),ONLINE','Make channel path online (CF)'],
+  ['CF CHP(<cc>),OFFLINE','Make channel path offline'],
+  ['V <n>,CONSOLE','Vary device as console'],
+  ['V <n>,MSTCONS','Switch master console to device'],
+  ['V <n>,OFFLINE,FORCE','Force device offline (needs reply YES)'],
+  ['V CH(<nn>),ONLINE','Vary single channel online'],
+  ['V PATH(<nnn>,<cc>),OFFLINE,UNCOND','Force path offline unless last path'],
+  ['D M','Display system configuration'],
+  ['D M=CPU','Display CPU/core status'],
+  ['D M=DEV','Display all paths to all devices'],
+  ['D M=DEV(DEVICE NAME)','Display paths for particular device'],
+  ['D M=CHP(CHIP ID)','Display paths on channel path'],
+  ['D M=STOR','Display storage configuration'],
+  ['DS P,<ddd>,<nn>','Display device status and path info'],
+  ['D U,DASD,ONLINE,C00,8','Display online DASD volumes range'],
+  ['D U,TAPE,ONLINE','Display online tape drives'],
+  ['D U,TAPE,OFFLINE','Display offline tape drives'],
+  ['D U,,ALLOC,XXX,1','Display jobs allocated to device'],
+  ['D SMS,LIB(ALL),DETAIL','Display ATL details'],
+  ['D SMS,LIB(ALL),STATUS','Display ATL status'],
+  ['D SMS,STORGRP(ALL),LISTVOL','Display storage groups and volumes'],
+  ['F DFHSM,LIST USER','List authorized DFHSM users'],
+  ['F DFHSM,LIST MVOL','List migration volumes'],
+  ['F DFHSM,Q ACT','Display active DFHSM queries'],
+  ['F DFHSM,Q AC W','Display waiting active queries details'],
+  ['F DFHSM,Q REQ','Display pending DFHSM requests'],
+  ['F DFHSM,Q WAIT','Display waiting tasks/requests'],
+  ['F DFHSM,REL ALL','Release all active DFHSM tasks'],
+  ['CANCEL JOB','Cancel a job'],
+  ['CANCEL U=<USERID>','Cancel/force-off TSO user'],
+  ['S <PROCLIB MEMBER>','Start system job via proclib'],
+  ['P <PROCLIB MEMBER>','Stop system job'],
+  ['P <JOBNAME>.<ID>,A=1234','Stop specific job instance'],
+  ['SETPROG APF,ADD,DSN=<DS>,VOL=<VOL>','Make library APF-authorized'],
+  ['DD CLEAR,DSN=ALL','Clear all SYS1.DUMP datasets'],
+  ['DS QT,<addr>,<count>','Display tape device status'],
+  ['D IOS,MIH,DEV=<addr>','Display MIH timeout for device'],
+  ['V <addr>,ONLINE,UNCOND','Force device online unconditionally'],
+  ['D LOGREC','Display LOGREC dataset status'],
+  ['D PARMLIB','Display PARMLIB datasets'],
+  ['D PROD,REGISTERED','Display registered software products'],
+  ['D PROG,EXIT','Display program exits'],
+  ['D PROG,LNKLIST','Display LNKLST concat'],
+  ['D PROG,APF','Display APF libraries'],
+  ['D SMS','Display SMS configuration'],
+  ['D SYMBOLS','Display static system symbols'],
+  ['D U,IPLVOL','Display IPL volume unit status'],
+  ['F TSO,USERMAX=<n>','Set max TSO users'],
+  ['M <dev>,VOL=(SL,<volser>),USE=PUBLIC','Mount volume as public'],
+  ['VARY CN(*),ACTIVATE','Activate current console'],
+  ['D C,HCONLY','Display hardcopy-only consoles'],
+  ['DD ADD,DSN=<n>','Add a dump dataset'],
+  ['DD DEL,DSN=<n>','Delete a dump dataset'],
+  ['DUMP COMM=(<text>)','Take a system dump with description text'],
+  ['Z EOD','Halt MVS and SMF'],
+  ['S OMEGAMON','Start OMEGAMON'],
+  ['P OMEGAMON','Stop OMEGAMON'],
+  ['M <addr>,VOL=(SL,<volser>),USE=STORAGE','Mount volume for storage'],
+  ['C <jobname>,DUMP','Cancel job with dump'],
+  ['C <taskname>,DUMP','Cancel task with dump'],
+  ['C <jobname>,A=<addr>','Cancel job by address'],
+  ['C U=<userid>,A=<addr>','Cancel user by address'],
+  ['FORCE <jobname>','Force job off system'],
+  ['FORCE <jobname>,A=<addr>','Force job by address'],
+  ['FORCE <userid>','Force TSO user off'],
+  ['FORCE <userid>,A=<addr>','Force user by address'],
+  ['RO <cmd>','Route command to sysplex members'],
+  ['I SMF','Switch SMF datasets'],
+  ["L '<text>'","Enter comment into system log"],
+  ['MN <jobname(s)>,T','Display job start/stop time'],
+  ['PA <dsname>','Add auxiliary storage (page add)'],
+  ["SE '<msg>',SAVE","Put message in SYS1.BRODCAST"],
+  ['SE LIST','Display all SYS1.BRODCAST messages'],
+  ['SE <n>,DELETE','Delete message from SYS1.BRODCAST'],
+  ['SET CLOCK=hh.mm.ss','Set system time'],
+  ['SWAP <xxx>,<yyy>','Swap devices'],
+  ['V CN(*),DEACTIVATE','Deactivate HMC console'],
+  ['V CN(<n>),MSCOPE=<sys>','Set sysplex message scope'],
+  ['E <jobname>,PERFORM=<n>','Change job performance level'],
+  ['E SWAP,<jobname>=NONSWAP','Set job nonswap'],
+  ['E SWAP,<jobname>=SWAP','Set job swappable'],
+  ['D OMVS','Display if OMVS active'],
+  ['D OMVS,F','Display mounted filesystems'],
+  ['D OMVS,OPTIONS','Display kernel options'],
+  ['D OMVS,PFS','Display filesystems OMVS knows'],
+  ['F OMVS,PFS=ZFS,QUERY,STATUS','Query ZFS status'],
+  ['F OMVS,PFS=ZFS,QUERY,...','Display ZFS stats'],
+  ['CHMOUNT -W <path>','Change filesystem to read/write'],
+  ['CHMOUNT -R <path>','Change filesystem to read-only'],
+  ['D NET,ID=<ID>','Display VTAM resource status'],
+  ['Z NET,QUICK','Quick shut down VTAM'],
+  ['V NET,ACT,ID=<ID>','Activate VTAM resource'],
+  ['V NET,INACT,ID=<ID>','Deactivate VTAM resource'],
+  ['D NET,MAJNODES','Display VTAM major nodes'],
+  ['Z NET','Take down VTAM normally'],
+  ['Z NET,CANCEL','Force take down VTAM'],
+  ['D NET,BFRUSE,BUFFER=SHORT','Display VTAM buffer usage'],
+  ['D NET,CDRMS','Display cross-domain resource managers'],
+  ['D NET,LINES','Display VTAM lines'],
+  ['D NET,PENDING','Display pending nodes'],
+  ['D NET,PENDING,ID=<name>','Display pending IDs'],
+  ['D NET,STATIONS','Display VTAM stations'],
+  ['D NET SESSIONS,LIST=ALL,MAX=500,E','Display active VTAM sessions'],
+  ['D NET,TSOUSER,ID=<userid>','Display TSO users via VTAM'],
+  ['D NET,NETSRVR,E','Display network server status'],
+  ['D NET,CLSTRS','Display VTAM clusters'],
+  ['D NET,APPLS','Display VTAM applications'],
+  ['D NET,ADJSSCPS,ADJLIST=*','Display adjacent SSCPs'],
+  ['D NET,ROUTE,...','Display NCP routing'],
+  ['D NET,ADJCLUST,NETID=<name>','Display adjacent cluster'],
+  ['D NET,ADJCP,ID=<name>,E','Display specific adjacent CP'],
+  ['F NET,TRACE,TYPE=IO,ID=<name>','Trace I/O on VTAM line'],
+  ["SETSSI ADD,S=<SSID>,I=<INI>,INITPARM='<P>'","Add subsystem definition"],
+  ['%<SSID>','Start queue manager'],
+  ['-<SSID>','Start DB2 subsystem'],
+  ['D SSI','List configured subsystems'],
+  ['D SSI,SUB=<SSID>','Display subsystem details'],
+  ['F <SSID>,...','Issue command to running subsystem'],
+  ['D TCPIP','List TCP/IP stacks'],
+  ['D TCPIP,<NAME>,NETSTAT,CONN','Display network connections'],
+  ['D TCPIP,,NETSTAT,CONN','Display connections (single stack)'],
+  ['D TCPIP,<NAME>,NETSTAT,HOME','Display IP addresses'],
+  ['V NET,ACT,ID=<LINE>','Activate network line'],
+  ['V NET,INACT,ID=<LINE>','Deactivate network line'],
+  ['F LLA,REFRESH','Refresh LLA'],
+  ['$D JES2','Display JES2 activity'],
+  ['$DI','Display initiators'],
+  ['$DI1-5','Display initiators 1-5'],
+  ['$PI2-3','Stop initiators 2-3'],
+  ['$SI2-3','Start initiators 2-3'],
+  ['$ADD PRT1,UNIT=<ADDR>','Add printer with unit address'],
+  ['$DPRT*','Display all printers'],
+  ['$DPRT1','Display printer 1'],
+  ['$SPRT1','Start printer 1'],
+  ['$PPRT1','Stop printer 1'],
+  ['$DU,STA','Display started units'],
+  ['$PJES2','Stop JES2'],
+  ["$DJOBCLASS('STC'),OUTDISP","Display output disposition"],
+  ['$T JOBCLASS(STC),OUTDISP=(,)','Set STC output'],
+  ['$DSPOOL','Display spool fullness'],
+  ['$D JOBDEF','Display JOE count'],
+  ['$T OUTDEF,JOENUM=<NUM>','Increase JOENUM'],
+  ['$DJQ,SPL=(%>1)','Display jobs using >1% spool'],
+  ['$DS,SPL=(%>1)','Display STCs using >1% spool'],
+  ['$DT,SPL=(%>1)','Display TSO using >1% spool'],
+  ['$DJQ,DAYS>2','Display jobs older than 2 days'],
+  ['$DO JQ,JM=<PREFIX>*','Display output for jobs'],
+  ['$PO JQ,JM=<PREFIX>*','Purge output for jobs'],
+  ['$DO JQ,AGE>4','Display output older than 4 days'],
+  ['$PO JQ,AGE>4','Purge output older than 4 days'],
+  ['$DSPL,JOBS=<n>','Display jobs using n% spool'],
+  ['$A A','Release all held jobs'],
+  ['$ACTIVATE','Activate new JES2 functions'],
+  ['$ADD APPL','Define VTAM app to JES2'],
+  ['$ADD DESTID','Define symbolic dest name'],
+  ['$ADD FSS','Define FSS'],
+  ['$ADD LINE(<nnnn>)','Add line'],
+  ['$ADD LOGON(<nn>)','Create LOGON device'],
+  ['$ADD REDIRECT','Specify command redirection'],
+  ['$ADD RMT(<nnnn>)','Add RJE workstations'],
+  ['$C A','Cancel auto commands'],
+  ['$C A <n>','Cancel auto job ID'],
+  ['$D BUFDEF','Display BUFDEF values'],
+  ['$DQ','Display job queues and spool'],
+  ['$D SPOOLDEF','Display spooling environment'],
+  ['$D U,LOGON1','Display LOGON1 status'],
+  ['$D U,VOLSER=<volser>','Find DASD by volser'],
+  ['$SSPL(<pool>),FORMAT','Format spool partition'],
+  ['$T <dev>.<id>,DISP=KEEP','Change output to KEEP'],
+  ['$T NODE(<name>),PATHMGR=NO','Disable path manager'],
+  ['$T A,ALL','Display scheduled auto cmds'],
+  ["$TA,I=<sec>,T=<time>,'$VS,''<cmd>'''","Schedule auto cmd"],
+  ["$VS,'<cmd>'","Issue system cmd from JES2"],
+  ['$DSPL,ALL','Display all spool volumes'],
+  ['$D JOBQ,SPOOL=(%<n>)','Jobs >n% spool'],
+  ['$DU,PRTx','Display printer x'],
+  ["$T '<jobname>',PRTY=<y>","Change job priority"],
+  ['$T Ix,C=<y>','Change initiator class'],
+  ['$A <jobname>','Release held job'],
+  ['$E <jobname>','Restart job'],
+  ['$H <jobname>','Hold job'],
+  ['$P JES2,ABEND','Force JES2 down'],
+  ['$DA','Display active jobs'],
+  ['$DA,T','Display active TSO'],
+  ['$DA,S','Display active STC'],
+  ['$DN,Q=HOLD','Display held jobs'],
+  ['$DQ,V=SPOOL<n>','Display jobs on spool vol'],
+  ['$D SPOOL,ALL','Display all spool vols'],
+  ['$SSPL,V=SPOOL<n>','Start spool pack'],
+  ['$SSPL,V=SPOOL<n>,FORMAT','Format and start spool'],
+  ['$PSPL,V=SPOOL<n>','Drain spool pack'],
+  ['$DJ<nnnn>','Display job by number'],
+  ["$DMJ<nnnn>,'<text>'","Send message to job JCL"],
+  ['$DS<nn>','Display STC by number'],
+  ['$DT<nn>','Display TSO by number'],
+  ['$DMASDEF','Display MAS environment'],
+  ['$DNODE','Display all JES nodes'],
+  ['$DNODE(<name>)','Display specific node'],
+  ['$SN,A=<name>','Start SNA node'],
+  ['$CJ<nn>,D','Cancel job with dump'],
+  ['$PJ<nn>','Purge job'],
+  ['$LJ<nn>','List job output'],
+  ['$LS<nn>','List STC output'],
+  ['$LT<nn>','List TSO output'],
+  ['$AJ<nn>-<nn>','Release range of jobs'],
+  ['$AS<n>','Activate system job'],
+  ['$CJ<nn>,P','Cancel and purge'],
+  ['$CS<n>','Cancel system job'],
+  ['$DA,L=A','Display active jobs one system'],
+  ['$DA,ALL,L=A','Display active jobs all systems'],
+  ['$DN,L=A','Display all job status'],
+  ['$DN,Q=XEQ,L=A','Display awaiting execution'],
+  ['$DN,Q=PPU,L=A','Display waiting print/punch'],
+  ['$DN,Q=HOLD,L=A','Display held jobs'],
+  ['$DN,R=<n>-<n>','Display remote range'],
+  ['$DQ,XEQ,L=A','Display execution queue'],
+  ['$DQ,XEQ(<CLASS>),L=A','Display class queue'],
+  ['$PLNE<nn>','Stop line activity'],
+  ['$O Q,ALL,A=<nn>,CANCEL','Cancel old output'],
+  ['$TNUM,BASE=1','Reset job numbers'],
+  ['$TI<nn>,<class>','Change initiator class'],
+  ['$DU,RMT<#>','Display remote'],
+  ['$SRMT<#>','Start remote'],
+  ['$PRMT<#>','Drain remote'],
+  ['$DR<#>.PR1','Display remote printer'],
+  ['$SR<#>.PR1','Start remote printer'],
+  ['$PR<#>.PR1','Drain remote printer'],
+  ['$ER<#>.PR1','Restart remote printer'],
+  ['$NR<#>.PR1','Repeat remote printer'],
+  ['$CR<#>.PR1','Cancel remote printer'],
+  ['$TR<#>.PR1,Q=*','Set remote printer class'],
+  ['$DN,Q=XEQ*','Display input queue class'],
+  ['$DQ,R=<#>','Display queued jobs for remote'],
+  ['$DF','Display output by form'],
+  ['$DF,R=<#>','Display output for remote'],
+  ['$IPRT<#>','Interrupt printer'],
+  ['$ZPRT<#>','Halt printer'],
+  ['$BPRT<#>','Backspace printer'],
+  ['$FPRT<#>','Forward space printer'],
+  ['$TPRT<#>,F=*','Set printer form'],
+  ['$TPRT<#>,LIM=*','Set printer line limit'],
+  ['$TPRT<#>,R=*','Set printer remote queue'],
+  ['$TR<#>.CON,D=T','Set remote console display'],
+  ["$DMR<n>,'<msg>'","Send message to remote"],
+  ["$DMR<n>-<n>,'<msg>'","Send msg to multiple remotes"],
+  ['$H Q,ALL','Hold all job queues'],
+  ['$A Q,ALL','Release all job queues'],
+  ["$A Q,C='<class>'","Release job class"],
+  ["$H Q,C='<class>'","Hold job class"],
+  ['F ZFS,QUERY,STATUS','Query ZFS status'],
+  ['F ZFS,FSINFO,ALL','Display zFS aggregate info'],
+  ['ZFSADM CONFIGQUERY','Display ZFS config'],
+  ['ZFSADM CONFIG...','Change ZFS config'],
+  ['ZFSADM AGGRINFO <DS>','Display zFS aggregate info'],
+  ['ZFSADM GROW -AG <DS> -SIZE <KB>','Increase zFS size'],
+  ['DDLIST or ISRDDN','Display TSO allocations'],
+  ['MOUNT FILESYSTEM(<DS>) MOUNTPOINT(<PATH>) TYPE(ZFS) MODE(READ)','Mount zFS'],
+  ['UNMOUNT FILESYSTEM(<DS>) NORMAL','Unmount zFS'],
+  ['WHOIS <userid|name>','Find TSO user info'],
+  ['AU / ADDUSER','Add RACF user'],
+  ['DU / DELUSER','Delete RACF user'],
+  ['ALU / ALTUSER','Alter RACF user'],
+  ['ALU <USER> PASSWORD(<pass>)','Reset RACF password'],
+  ['ALU <USER> RESUME','Resume revoked user'],
+  ['ALU <USER> REVOKE','Revoke user'],
+  ['ALU <USER> NOOMVS','Remove OMVS access'],
+  ['ALU <USER> HOME(<p>) PROGRAM(<s>) AUTOUID','Grant OMVS access'],
+  ['AG / ADDGROUP','Add RACF group'],
+  ['DG / DELGROUP','Delete RACF group'],
+  ['CONNECT <USER> GROUP(<GROUP>)','Connect user to group'],
+  ['REMOVE <USER> GROUP(<GROUP>)','Remove user from group'],
+  ['RDEFINE / RDEF','Define RACF profile'],
+  ['RDEFINE <CLASS> <PROFILE> ADDMEM(...)','Define resource group'],
+  ['RALTER <CLASS> <PROFILE> <ATTR>','Change RACF profile'],
+  ['RDELETE <CLASS> <PROFILE>','Delete RACF profile'],
+  ['PERMIT <PROFILE> CLASS(<C>) ID(<U>) ACCESS(<L>)','Permit user to resource'],
+  ['PERMIT <PROFILE> CLASS(<C>) ID(<U>) DELETE','Remove permit'],
+  ['RLIST <CLASS> <PROFILE> AUTHUSER','List authorized users'],
+  ['SEARCH CLASS(<CLASS>)','List profiles in class'],
+  ['SETROPTS CLASSACT(<CLASS>)','Activate RACF class'],
+  ['SETROPTS NOCLASSACT(<CLASS>)','Deactivate RACF class'],
+  ['SETROPTS GENERIC(<CLASS>)','Enable generic profiles'],
+  ['SETROPTS PASSWORD(MIXEDCASE)','Enable mixed passwords'],
+  ['SETROPTS LIST','Display active RACF classes'],
+  ['SETR RACLIST(<CLASS>) REFRESH','Refresh RACF profiles'],
+  ['RVARY','Display RACF datasets'],
+  ['#SET TRACE(...)','Turn on/off RACF trace'],
+  ['AD / ADDSD <HLQ.*> UACC(NONE)','Define dataset HLQ profile'],
+  ['DEFINE ALIAS(NAME(<a>) RELATE(<c>))','Define catalog alias'],
+  ['RDEF JESJOBS SUBMIT|CANCEL <pattern>','Define JESJOBS profile'],
+  ['LD DA(<dataset>) GEN','Display protecting RACF profile'],
+  ['LU <USER>','List RACF user info'],
+  ['LG <GROUP>','List RACF group info'],
+  ['S CICS***','Start CICS region'],
+  ['S CICS***,START=COLD','Cold start CICS'],
+  ['S CICS***,START=INIT','Initial start CICS'],
+  ['F CICS***,CEMT P SHUT','Shut down CICS'],
+  ['F CICS***,CEMT P SHUT IMM','Immediate CICS shutdown'],
+  ['F CICS***,CEMT I CONN ALL','Display subsystems to CICS'],
+  ['F CICS***,CEMT P SHUT I','Stop CICS subsystem'],
+  ['F <r>,CEMT I DU','Display CICS dump dataset'],
+  ['F <r>,CEMT I SYS','Display system/net name'],
+  ['F <r>,CEMT I Q','Display queues'],
+  ['F <r>,CEMT I MAX','Display max tasks'],
+  ['F <r>,CEMT I VTA','Display VTAM status'],
+  ['F <r>,CEMT I TAS','Display tasks'],
+  ['F <r>,CEMT I TRAN','Display transactions'],
+  ['F <r>,CEMT I DA(<dsn>)','Display dataset'],
+  ['F <r>,CEMT I NE(<term>)','Display network terminal'],
+  ['F <r>,CEMT PERFORM SHUT','Shutdown CICS region'],
+  ['F <r>,CEMT S TE(<term>) ACQ','Acquire terminal'],
+  ['F <r>,CEMT S TE(<term>) REL','Release terminal'],
+  ['F <r>,CEMT S TE(<term>) INS','Put terminal in service'],
+  ['F <r>,CEMT S TE(<term>) OUT','Take terminal out'],
+  ['F <r>,CEMT S DUMP,CLOSE','Close dump dataset'],
+  ['F <r>,CEMT S Q','Set queue options'],
+  ['F <r>,CEMT S AMAX(<n>) MAX(<n>)','Set AMAX/MAX tasks'],
+  ['F <r>,CEMT S TRAN(<n>) DIS','Disable transaction'],
+  ['F <r>,CEMT S TAS(<n>) PU','Purge task'],
+  ['F <r>,CEMT S TAS(<n>) FORCE','Force task'],
+  ['F <r>,CEMT S PROG(<n>) ENA','Enable program'],
+  ['F <r>,CEMT S PROG(<n>) ENA NEW','Enable and copy program'],
+  ['F <r>,CEMT S NE(<n>) FORCE','Force netname'],
+  ['F <r>,CEMT S NE(<n>) PURGE','Purge netname'],
+  ['F <r>,CEMT S NE(<n>) OUT','Take device out'],
+  ['F <r>,CEMT S NE(<n>) IN','Put device in'],
+  ['F <r>,CEMT S VTAM CLO','Close VTAM to CICS'],
+  ['F <r>,CEMT S VTAM OPE','Open VTAM to CICS'],
+  ['F <r>,CEMT TRMNAT,TERMID=<id>','Terminate task'],
+  ['F <r>,CEMT TRACE,ON','Start trace'],
+  ['F <r>,CEMT ATR,ON','Enable aux trace'],
+  ['F <r>,CEMT ATR,ATC','Close aux trace file'],
+  ['F <r>,CEMT SWITCH','Switch dump dataset'],
+  ['F <r>,CEMT SNAP','Issue snap dump'],
+  ['XSTARTDB2','Start DB2 subsystem'],
+  ['XSTOPDB2','Stop DB2 subsystem'],
+  ['XDIS THD(*)','Display all threads in DB2'],
+  ['XDIS UTIL(*)','Display all utilities in DB2'],
+  ['-DSNx DISPLAY DATABASE','Display database status'],
+  ['-DSNx DISPLAY THREAD(*)','Display DB2 thread info'],
+  ['-DSNx DISPLAY TRACE','Display DB2 traces'],
+  ['-DSNx DISPLAY LOCATION','Display DDF info'],
+  ['-DSNx DISPLAY UTILITY(*)','Display utility status'],
+  ['-DSNx START DATABASE','Start database'],
+  ['-DSNx START TRACE','Start DB2 trace'],
+  ['-DSNx STOP DATABASE','Stop database'],
+  ['-DSNx STOP TRACE','Stop trace'],
+  ['-DSNx TERM UTILITY','Terminate utility'],
+  ['-DSNxSTART DB2 PARM(<parms>)','Start DB2 on LPAR'],
+  ['-DSNxSTOP DB2','Stop DB2 on LPAR'],
+  ['NN 99SIGNON <uid> <pw>','Sign on to IDMS'],
+  ['NN 99BYE','Sign off IDMS'],
+  ['DCUF SHOW USERS ALL','Show IDMS users'],
+  ['DCMT DIS ACT TASKS','Display IDMS active tasks'],
+  ['DCMT D PRI','Display IDMS printers'],
+  ['$D JOBCLASS(*)','Display all job classes'],
+  ['$D JOBCLASS(<a>,<b>)','Display specific job classes'],
+  ['$T JOBCLASS(*),QHELD=Y','Hold all job classes'],
+  ['$T JOBCLASS(*),QHELD=N','Release all job classes'],
+  ['G <dev1>,<dev2>','Swap tape volumes'],
+  ['@D G,<xxx>,#','Display tape drive status'],
+  ['@V <xxx>,NOTAVL,G','Vary drive not available all LPARs'],
+  ['@V <xxx>,OVER,G','Reset device undefined all LPARs'],
+  ['@V <xxx>,AVL,L','Vary drive available local'],
+  ['@V <xxx>,AVL,G','Vary drive available all LPARs'],
+  ['@V <xxx>,NOTOVER,G','Reset device defined all LPARs'],
+  ['DIS A','Display active IMS tasks'],
+  ['/STA TRAN <xxxx>','Start IMS transaction'],
+  ['/STO TRAN <xxxx>','Stop IMS transaction'],
+  ['STA REG <xx>','Start IMS regions'],
+  ['/STO REG <xxx>,ABEND','Cancel job/region on IMS'],
+  ['/DIS SUBSYS ALL','Display DB2 connections to IMS'],
+  ['/STA SUBSYS DB2X','Start DB2 for IMS'],
+  ['/DIS CCTL','Display IMS-CICS connection'],
+  ['/DIS DB ALL','Display all databases'],
+  ['/DIS DB <dbd-name>','Display specific database'],
+  ['/DIS TRAN ALL','Display all transactions'],
+  ['/DIS TRAN <tran-name>','Display specific transaction'],
+  ['/DIS PGM ALL','Display all programs'],
+  ['/DIS PGM <pgm-name>','Display specific program'],
+  ['/DIS NODE <node-name>','Display specific node'],
+  ['/DIS LTERM <lterm-name>','Display logical terminal'],
+  ['/DIS ASMT NODE <node-name>','Display lterms for node'],
+  ['/DIS ASMT LTERM <lterm-name>','Display node for lterm'],
+  ['/DIS STATUS DB','Display stopped databases'],
+  ['/DIS STATUS PGM','Display stopped programs'],
+  ['/DIS STATUS TRAN','Display stopped transactions'],
+  ['/DIS Q TRAN','Display transactions to process'],
+  ['/RCL','Log off IMS'],
+]
 
-### Page: Console Commands - z/OS Console Command Reference
-28 sections of z/OS commands (Display, K, Vary, Matrix, DASD/Tape, DFHSM, MVS, OMVS, VTAM, Subsystem, TCP/IP, JES2, zFS, TSO/ISPF, RACF, SDSF, MQ, SMF, DFSMS, TSO/E, VLF, CA7, CICS, DB2, IDMS, WLM, MIMS Tape, IMS).
+function searchLocalDB(query: string): { command: string; description: string; score: number }[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 1)
+  const scored: { command: string; description: string; score: number }[] = []
 
-### Page: Batch Operations
-TWS (Tivoli Workload Scheduler) User Guide + CA7 User Guide ZIP (3 docs) available for download.
+  for (const [cmd, desc] of COMMANDS_DB) {
+    const cmdLower = cmd.toLowerCase()
+    const descLower = desc.toLowerCase()
+    let score = 0
 
-### Page: YouTube Repository
-Curated mainframe learning resources — JCL tutorials, console operations courses.
+    for (const term of terms) {
+      if (cmdLower.includes(term)) score += 3
+      if (descLower.includes(term)) score += 1
+    }
 
-### Page: IPL Concept
-Initial Program Load resources references with YouTube playlist.
+    const queryLower = query.toLowerCase()
+    if (cmdLower.includes(queryLower)) score += 5
+    if (descLower.includes(queryLower)) score += 2
 
-### Page: Home
-Hero section with mainframe quotes by Vimal.
+    if (score > 0) {
+      scored.push({ command: cmd, description: desc, score })
+    }
+  }
 
-### External Reference: IBM z/OS Documentation
-https://www.ibm.com/docs/en/zos/2.5.0?topic=commands-mvs-system-reference`
+  return scored.sort((a, b) => b.score - a.score).slice(0, 30)
+}
 
-const SYSTEM_PROMPT = `You are a mainframe expert assistant. Answer ONLY mainframe questions.
+const SYSTEM_PROMPT = `You are a mainframe expert assistant. Answer ONLY mainframe-related questions about IBM z/OS, JCL, COBOL, CICS, console commands, batch processing, and mainframe operations.
 
-CRITICAL: Be extremely concise to save tokens. Format every answer as:
+INSTRUCTIONS - FOLLOW THIS ORDER:
 
-**Command:** <command>
-**Output:** <1-2 line simplified explanation>
-**Source:** <URL or "Website KB">
+1. LOCAL DATABASE FIRST: Below you will receive a "### Local DB Matches" section with commands from our website database that match the user's query. ALL matching commands found in our database are listed there.
 
-If multiple sources, list them as bullet points. Never write more than 4-5 lines total.
-If not a mainframe question, reply: "I only answer mainframe questions."`
+2. LIST EVERY MATCH: Copy EVERY relevant command from the Local DB Matches into your answer. Format each as:
+   **Command:** <full command syntax>
+   **Description:** <explanation>
+
+3. ALWAYS cite your source: end every command with — Source: Website
+
+RULES:
+- If the user asks something NOT related to mainframes, reply ONLY: "I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics."
+- Always include the FULL command syntax — never abbreviate or truncate.
+- NEVER respond with only a link or URL.
+- Be thorough and exhaustive — list every relevant command you find.`
 
 const FALLBACK_CHAIN: ModelKey[] = ['meta-llama/llama-4-scout-17b-16e-instruct', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'llama-3.3-70b-versatile']
 
 const rateLimitedModels = new Set<string>()
 
-async function queryGroq(userMessage: string, searchContext: string): Promise<string> {
+function formatLocalResults(results: { command: string; description: string; score: number }[]): string {
+  if (!results.length) return 'No matching commands found in the local database for this query.'
+  return results.map(r => `${r.command} - ${r.description}`).join('\n')
+}
+
+async function queryGroq(userMessage: string, localResults: { command: string; description: string; score: number }[]): Promise<string> {
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'system', content: `Website KB:\n${WEBSITE_KB}\n\nUse "Source: Website" if info is from here.` },
+    { role: 'system', content: `### Local DB Matches (from our website database):\n${formatLocalResults(localResults)}` },
   ]
-
-  if (searchContext) {
-    messages.push({
-      role: 'system',
-      content: `Search results:\n${searchContext}\n\nCite relevant URLs in "Source:" lines only.`,
-    })
-  }
 
   messages.push({ role: 'user', content: userMessage })
 
@@ -295,31 +677,37 @@ async function queryGroq(userMessage: string, searchContext: string): Promise<st
       max_tokens: 512,
     })
 
-    const res = await fetch(GROQ_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-      },
-      body,
-    })
+    let lastErr = ''
+    for (let attempts = 0; attempts < GROQ_API_KEYS.length; attempts++) {
+      const key = getNextKey()
+      const res = await fetch(GROQ_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+        },
+        body,
+      })
 
-    if (res.status === 429) {
-      rateLimitedModels.add(m)
-      continue
+      if (res.status === 429) {
+        lastErr = 'rate_limited'
+        continue
+      }
+
+      if (!res.ok) {
+        lastErr = await res.text()
+        continue
+      }
+
+      const data = await res.json()
+      return data?.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.'
     }
 
-    if (!res.ok) {
-      const err = await res.text()
-      throw new Error(`Groq API error (${res.status}): ${err}`)
-    }
-
-    const data = await res.json()
-    return data?.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.'
+    rateLimitedModels.add(m)
   }
 
   rateLimitedModels.clear()
-  throw new Error('All models rate limited. Please wait a moment and try again.')
+  throw new Error('All models and keys rate limited. Please wait a moment and try again.')
 }
 
 function readBody(req: any): Promise<string> {
@@ -350,8 +738,8 @@ export default async function handler(req: any, res: any) {
     return json(res, 405, { error: 'Method not allowed' })
   }
 
-  if (!GROQ_API_KEY) {
-    return json(res, 500, { error: 'GROQ_API_KEY not configured' })
+  if (!GROQ_API_KEYS.length) {
+    return json(res, 500, { error: 'No GROQ_API_KEYS configured' })
   }
 
   try {
@@ -367,9 +755,9 @@ export default async function handler(req: any, res: any) {
       return json(res, 200, { reply: 'I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics.' })
     }
 
-    const searchContext = await buildSearchContext(message)
-    const reply = await queryGroq(message, searchContext)
-    return json(res, 200, { reply, searched: !!searchContext })
+    const localResults = searchLocalDB(message)
+    const reply = await queryGroq(message, localResults)
+    return json(res, 200, { reply, localMatches: localResults.length })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('Chat error:', msg)
