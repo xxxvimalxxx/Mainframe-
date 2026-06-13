@@ -755,13 +755,15 @@ export default async function handler(req: any, res: any) {
       return json(res, 400, { error: 'Message is required' })
     }
 
+    const mainframeQuery = message.trim().endsWith('?') ? message.trim().slice(0, -1) + ' in mainframe?' : message.trim() + ' in mainframe'
+
     const relevance = await checkRelevance(message)
     if (relevance === 'irrelevant') {
-      return json(res, 200, { reply: 'I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics.' })
+      return json(res, 200, { reply: 'I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics.')
     }
 
-    const localResults = searchLocalDB(message)
-    const reply = await queryGroq(message, localResults)
+    const localResults = searchLocalDB(mainframeQuery)
+    const reply = await queryGroq(mainframeQuery, localResults)
     return json(res, 200, { reply, localMatches: localResults.length })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
