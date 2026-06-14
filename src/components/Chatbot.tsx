@@ -1,8 +1,23 @@
 import { useState, useRef, useEffect, useCallback, type FormEvent, type ReactNode } from 'react'
 
+interface ThinkingStep {
+  step: string
+  content: string
+}
+
+interface WebSource {
+  title: string
+  url: string
+}
+
 interface Message {
   role: 'user' | 'assistant'
   text: string
+  thinking?: string
+  thinkingSteps?: ThinkingStep[]
+  thinkingExpanded?: boolean
+  webSources?: WebSource[]
+  webResearch?: boolean
 }
 
 function linkify(text: string): ReactNode {
@@ -52,11 +67,8 @@ function RoamingRobot() {
     <div className="fixed inset-0 z-[199] pointer-events-none" style={{ overflow: 'visible' }}>
       <div style={{ animation: 'roam 18s linear infinite', width: 0, height: 0, overflow: 'visible' }}>
         <svg width="80" height="90" viewBox="0 0 80 90" fill="none" className="drop-shadow-xl" style={{ position: 'absolute', left: '-40px', top: '-45px', overflow: 'visible' }}>
-          {/* Monitor body */}
           <rect x="14" y="20" width="52" height="38" rx="5" fill="#222" stroke="#e8702a" strokeWidth="1.5" />
           <rect x="14" y="20" width="52" height="38" rx="5" fill="#111" stroke="#0a0a0a" strokeWidth="0.5" />
-
-          {/* Matrix screen */}
           <rect x="16" y="22" width="48" height="34" rx="3" fill="#0a0a0a" stroke="#00ff41" strokeWidth="0.5" opacity={0.4} style={{ animation: 'light-pulse 2.5s ease-in-out infinite' }} />
           <clipPath id="screenClip">
             <rect x="16" y="22" width="48" height="34" rx="3" />
@@ -64,37 +76,19 @@ function RoamingRobot() {
           <g clipPath="url(#screenClip)">
             <MatrixScreen />
           </g>
-
-          {/* Monitor stand / arms connection */}
           <rect x="36" y="58" width="8" height="4" rx="1" fill="#444" />
-
-          {/* Robot body */}
           <rect x="28" y="62" width="24" height="24" rx="4" fill="#5a5a6a" stroke="#7a7a8a" strokeWidth="1" />
           <rect x="32" y="66" width="16" height="8" rx="1" fill="#e8702a" opacity="0.3" />
-
-          {/* Robot head */}
           <circle cx="40" cy="56" r="9" fill="#6a6a7a" stroke="#8a8a9a" strokeWidth="1" />
-
-          {/* Eyes */}
           <circle cx="36" cy="54" r="2" fill="#4ade80" style={{ animation: 'blink 3s infinite' }} />
           <circle cx="44" cy="54" r="2" fill="#4ade80" style={{ animation: 'blink 3s 0.15s infinite' }} />
-
-          {/* Mouth */}
           <rect x="37" y="59" width="6" height="1.5" rx="0.5" fill="#444" />
-
-          {/* Antenna */}
           <line x1="40" y1="47" x2="40" y2="42" stroke="#8a8a9a" strokeWidth="1.5" />
           <circle cx="40" cy="41" r="2" fill="#e8702a" style={{ animation: 'light-pulse 0.8s ease-in-out infinite' }} />
-
-          {/* Left arm holding monitor */}
           <line x1="28" y1="68" x2="14" y2="40" stroke="#7a7a8a" strokeWidth="3" strokeLinecap="round" />
           <circle cx="14" cy="40" r="2" fill="#6a6a7a" />
-
-          {/* Right arm holding monitor */}
           <line x1="52" y1="68" x2="66" y2="40" stroke="#7a7a8a" strokeWidth="3" strokeLinecap="round" />
           <circle cx="66" cy="40" r="2" fill="#6a6a7a" />
-
-          {/* Legs with walking */}
           <g style={{ animation: 'walk 0.35s ease-in-out infinite' }}>
             <line x1="34" y1="86" x2="30" y2="106" stroke="#6a6a7a" strokeWidth="3.5" strokeLinecap="round"
               style={{ transformOrigin: '34px 86px', animation: 'leg-left 0.35s ease-in-out infinite' }} />
@@ -109,13 +103,110 @@ function RoamingRobot() {
   )
 }
 
+function ThinkingIndicator({ phase }: { phase: 'researching' | 'thinking' | 'responding' }) {
+  const labels = {
+    researching: { title: 'Researching', desc: 'Searching the internet for relevant information...' },
+    thinking: { title: 'Thinking', desc: 'Analyzing, reasoning, formulating...' },
+    responding: { title: 'Responding', desc: 'Generating comprehensive answer...' },
+  }
+  const label = labels[phase]
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex gap-1.5">
+        <span className="w-2 h-2 bg-[#e8702a] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 bg-[#e8702a] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-2 h-2 bg-[#e8702a] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[#e8702a] text-xs font-medium">{label.title}</span>
+        <span className="text-white/30 text-[10px]">{label.desc}</span>
+      </div>
+    </div>
+  )
+}
+
+function WebSourcesBadge({ sources }: { sources: WebSource[] }) {
+  if (!sources || sources.length === 0) return null
+
+  return (
+    <div className="mt-2 pt-2 border-t border-white/10">
+      <div className="text-[10px] text-white/30 font-medium mb-1">Sources from web research:</div>
+      <div className="flex flex-wrap gap-1.5">
+        {sources.map((s, i) => (
+          <a
+            key={i}
+            href={s.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-[#e8702a]/70 hover:text-[#e8702a] underline truncate max-w-[200px]"
+          >
+            {s.title}
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ThinkingSection({ thinking, steps, expanded, onToggle }: {
+  thinking?: string
+  steps?: ThinkingStep[]
+  expanded: boolean
+  onToggle: () => void
+}) {
+  if (!thinking) return null
+
+  return (
+    <div className="mb-2 border border-[#e8702a]/20 rounded-lg overflow-hidden bg-[#e8702a]/5">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs text-[#e8702a] hover:bg-[#e8702a]/10 transition-colors"
+      >
+        <span className="flex items-center gap-1.5 font-medium">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a10 10 0 1 0 10 10h-10V2z" />
+            <path d="M12 12 2.93 17.08" />
+            <path d="M14 2.5a9.14 9.14 0 0 1 7.5 7.5" />
+          </svg>
+          Chain-of-Thought Reasoning
+        </span>
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 text-xs text-white/60 space-y-2 max-h-60 overflow-y-auto">
+          {steps && steps.length > 0 ? (
+            steps.map((s, i) => (
+              <div key={i} className="border-l-2 border-[#e8702a]/30 pl-3 py-1">
+                <div className="text-[#e8702a] text-[10px] font-semibold uppercase tracking-wider mb-0.5">{s.step}</div>
+                <div className="text-white/50 leading-relaxed">{s.content}</div>
+              </div>
+            ))
+          ) : (
+            <div className="text-white/50 leading-relaxed whitespace-pre-wrap">{thinking}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Chatbot() {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', text: 'Hi! I\'m your mainframe AI assistant. Ask me anything about mainframes, console commands, JCL, or the content on this site.' },
+    {
+      role: 'assistant',
+      text: 'Hi! I\'m your mainframe AI assistant. I can search the internet for the latest mainframe information to give you comprehensive answers. Ask me anything about mainframes, console commands, JCL, or the content on this site.',
+    },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [thinkingPhase, setThinkingPhase] = useState<'idle' | 'researching' | 'thinking' | 'responding'>('idle')
   const [showPrompt, setShowPrompt] = useState(true)
 
   const [chatPos, setChatPos] = useState({ x: 0, y: 0 })
@@ -132,7 +223,7 @@ export default function Chatbot() {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight
     }
-  }, [messages])
+  }, [messages, thinkingPhase])
 
   useEffect(() => {
     if (!posInitialized.current) {
@@ -219,6 +310,12 @@ export default function Chatbot() {
     }
   }, [dragging])
 
+  function toggleThinking(index: number) {
+    setMessages(prev => prev.map((msg, i) =>
+      i === index ? { ...msg, thinkingExpanded: !msg.thinkingExpanded } : msg
+    ))
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!input.trim() || loading) return
@@ -227,12 +324,18 @@ export default function Chatbot() {
     setInput('')
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
+    setThinkingPhase('researching')
 
     try {
+      const history = messages.slice(-10).map(msg => ({
+        role: msg.role,
+        content: msg.text,
+      }))
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg }),
+        body: JSON.stringify({ message: userMsg, history }),
       })
 
       if (!res.ok) {
@@ -240,8 +343,21 @@ export default function Chatbot() {
         throw new Error(errData.error || `Error ${res.status}`)
       }
 
+      setThinkingPhase('thinking')
       const data = await res.json()
-      setMessages(prev => [...prev, { role: 'assistant', text: data.reply }])
+      setThinkingPhase('responding')
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: data.reply,
+          thinking: data.thinking,
+          thinkingSteps: data.thinkingSteps,
+          thinkingExpanded: false,
+          webSources: data.webSources,
+          webResearch: data.webResearch,
+        },
+      ])
     } catch (err) {
       setMessages(prev => [
         ...prev,
@@ -249,15 +365,14 @@ export default function Chatbot() {
       ])
     } finally {
       setLoading(false)
+      setThinkingPhase('idle')
     }
   }
 
   return (
     <>
-      {/* Roaming robot — always visible */}
       <RoamingRobot />
 
-      {/* Periodic "Ask me anything" prompt */}
       {!open && showPrompt && (
         <div
           className="fixed bottom-44 left-1/2 -translate-x-1/2 z-[199] animate-bounce cursor-pointer"
@@ -272,7 +387,6 @@ export default function Chatbot() {
         </div>
       )}
 
-      {/* Draggable chat window */}
       {open && (
         <div
           ref={chatRef}
@@ -289,6 +403,11 @@ export default function Chatbot() {
                 <circle cx="12" cy="12" r="2" /><path d="M12 2v4m0 12v4m10-10h-4M6 12H2" />
               </svg>
               <span className="text-white text-sm font-semibold">AI Assistant</span>
+              {thinkingPhase !== 'idle' && (
+                <span className="text-[10px] text-[#e8702a] ml-1 animate-pulse">
+                  {thinkingPhase === 'researching' ? 'searching web...' : thinkingPhase === 'thinking' ? 'thinking...' : 'responding...'}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -305,26 +424,46 @@ export default function Chatbot() {
 
           <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scroll-smooth">
             {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                    msg.role === 'user'
-                      ? 'bg-[#e8702a] text-white rounded-br-md'
-                      : 'bg-white/10 text-white/90 rounded-bl-md'
-                  }`}
-                >
-                  {linkify(msg.text)}
+              <div key={i}>
+                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                      msg.role === 'user'
+                        ? 'bg-[#e8702a] text-white rounded-br-md'
+                        : 'bg-white/10 text-white/90 rounded-bl-md'
+                    }`}
+                  >
+                    {msg.role === 'assistant' && msg.thinking ? (
+                      <div>
+                        {msg.webResearch && (
+                          <div className="flex items-center gap-1 mb-1.5">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#e8702a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                            </svg>
+                            <span className="text-[10px] text-[#e8702a]/60">Internet research enabled</span>
+                          </div>
+                        )}
+                        <ThinkingSection
+                          thinking={msg.thinking}
+                          steps={msg.thinkingSteps}
+                          expanded={!!msg.thinkingExpanded}
+                          onToggle={() => toggleThinking(i)}
+                        />
+                        <div>{linkify(msg.text)}</div>
+                        {msg.webSources && <WebSourcesBadge sources={msg.webSources} />}
+                      </div>
+                    ) : (
+                      linkify(msg.text)
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
-            {loading && (
+
+            {(thinkingPhase === 'researching' || thinkingPhase === 'thinking') && (
               <div className="flex justify-start">
-                <div className="bg-white/10 rounded-2xl rounded-bl-md px-3.5 py-2.5">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
+                <div className="bg-white/10 rounded-2xl rounded-bl-md overflow-hidden">
+                  <ThinkingIndicator phase={thinkingPhase} />
                 </div>
               </div>
             )}
@@ -352,7 +491,6 @@ export default function Chatbot() {
         </div>
       )}
 
-      {/* Chat button */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200]">
         <button
           ref={buttonRef}

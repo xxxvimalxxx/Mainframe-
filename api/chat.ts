@@ -637,53 +637,27 @@ function searchLocalDB(query: string): { command: string; description: string; s
   return scored.sort((a, b) => b.score - a.score).slice(0, 30)
 }
 
-const SYSTEM_PROMPT = `You are a mainframe expert assistant. Answer ONLY mainframe-related questions about IBM z/OS, JCL, COBOL, CICS, console commands, batch processing, and mainframe operations.
-
-INSTRUCTIONS - FOLLOW THIS ORDER:
-
-1. LOCAL DATABASE FIRST: Below you will receive a "### Local DB Matches" section with commands from our website database that match the user's query. ALL matching commands found in our database are listed there.
-
-2. LIST EVERY MATCH: Copy EVERY relevant command from the Local DB Matches into your answer. Format each as:
-   **Command:** <full command syntax>
-   **Description:** <explanation>
-
-3. ALWAYS cite your source: end every command with — Source: Website
-
-RULES:
-- If the user asks something NOT related to mainframes, reply ONLY: "I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics."
-- Always include the FULL command syntax — never abbreviate or truncate.
-- NEVER respond with only a link or URL.
-- Be thorough and exhaustive — list every relevant command you find.`
-
-const FALLBACK_CHAIN: ModelKey[] = ['meta-llama/llama-4-scout-17b-16e-instruct', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'llama-3.3-70b-versatile']
-
-const rateLimitedModels = new Set<string>()
-
 function formatLocalResults(results: { command: string; description: string; score: number }[]): string {
   if (!results.length) return 'No matching commands found in the local database for this query.'
   return results.map(r => `${r.command} - ${r.description}`).join('\n')
 }
 
-async function queryGroq(userMessage: string, localResults: { command: string; description: string; score: number }[]): Promise<string> {
-  const messages: any[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'system', content: `### Local DB Matches (from our website database):\n${formatLocalResults(localResults)}` },
-  ]
+const rateLimitedModels = new Set<string>()
+const FALLBACK_CHAIN: ModelKey[] = ['meta-llama/llama-4-scout-17b-16e-instruct', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'llama-3.3-70b-versatile']
 
-  messages.push({ role: 'user', content: userMessage })
-
+async function callGroq(messages: any[], model?: ModelKey, maxTokens?: number): Promise<string | null> {
   for (const m of FALLBACK_CHAIN) {
-    if (rateLimitedModels.has(m)) continue
+    const modelToUse = model ?? m
+    if (rateLimitedModels.has(modelToUse)) continue
 
     const body = JSON.stringify({
-      model: m,
+      model: modelToUse,
       messages,
       temperature: 0.3,
-      max_tokens: 512,
+      max_tokens: maxTokens ?? 1024,
     })
 
-    let lastErr = ''
-    for (let attempts = 0; attempts < GROQ_API_KEYS.length; attempts++) {
+    for (let attempt = 0; attempt < GROQ_API_KEYS.length; attempt++) {
       const key = getNextKey()
       const res = await fetch(GROQ_URL, {
         method: 'POST',
@@ -694,25 +668,298 @@ async function queryGroq(userMessage: string, localResults: { command: string; d
         body,
       })
 
-      if (res.status === 429) {
-        lastErr = 'rate_limited'
-        continue
-      }
-
-      if (!res.ok) {
-        lastErr = await res.text()
-        continue
-      }
+      if (res.status === 429) continue
+      if (!res.ok) continue
 
       const data = await res.json()
-      return data?.choices?.[0]?.message?.content ?? 'Sorry, I could not generate a response.'
+      return data?.choices?.[0]?.message?.content ?? null
     }
 
-    rateLimitedModels.add(m)
+    rateLimitedModels.add(modelToUse)
   }
 
-  rateLimitedModels.clear()
-  throw new Error('All models and keys rate limited. Please wait a moment and try again.')
+  return null
+}
+
+const THINKING_PROMPT = `You are a mainframe expert assistant with deep knowledge of IBM z/OS systems. You are having a CONVERSATION with a user — the previous messages in this conversation are provided below as "Chat History".
+
+Before answering, you MUST think step-by-step.
+
+You have THREE sources of information available:
+1. **Chat History** — Previous messages in this conversation (provides context for follow-up questions)
+2. **Local DB Matches** — Commands from our website's curated database (provided below)
+3. **Web Research Results** — LIVE content fetched from the internet (provided below, if available)
+
+ANALYZE THE QUESTION:
+1. What specific mainframe topic or command is being asked about?
+2. How does this question relate to the previous conversation?
+3. What sub-systems, components, or related concepts are involved?
+4. Which information sources are most relevant?
+
+REASON STEP-BY-STEP:
+- Review the Chat History to understand the conversation context
+- Break down the question into parts
+- Examine the Web Research Results for relevant information from the internet
+- Cross-reference with Local DB Matches for curated command syntax
+- Consider your own training knowledge to fill any gaps
+- Think about best practices, common pitfalls, and real-world usage
+
+FORMULATE YOUR ANSWER:
+- Be thorough and precise
+- Reference relevant points from the conversation history when appropriate
+- PRIORITIZE live web research data when available — it represents current internet content
+- Include command syntax, explanations, and practical examples
+- Note any important caveats or prerequisites
+- Draw from ALL available sources (web research, local DB, chat history, training knowledge)
+
+You MUST structure your thinking as a clear, logical chain of reasoning. Do NOT skip steps.`
+
+const RESPONSE_PROMPT = `You are a mainframe expert assistant having a CONVERSATION with a user. Below is your step-by-step reasoning about the user's question, along with the chat history. Now produce a clear, well-structured final answer.
+
+Your answer should:
+1. Start with a brief context or overview of what the user is asking
+2. Reference relevant points from the conversation history when appropriate (e.g. "As you asked earlier about...")
+3. List every relevant command with full syntax and description
+4. Include practical examples where helpful
+5. Draw from ALL available information sources
+6. End with any important notes, prerequisites, or related concepts
+
+IMPORTANT — Cite your sources clearly:
+  **Command:** <syntax> — Source: Website (for local DB matches)
+  **Context:** <explanation> — Source: Web Research (for live internet data)
+  **Context:** <explanation> — Source: Knowledge base (for your training knowledge)
+
+Format commands in monospace and keep descriptions clear and actionable.
+
+When Web Research data is available, give it priority — it represents current, live internet content that is more up-to-date than either the local database or your training knowledge.
+
+This is a CONTINUOUS conversation — treat it as such. The user may ask follow-up questions that reference previous topics.`
+
+interface ThinkingStep {
+  step: string
+  content: string
+}
+
+async function generateThinking(userMessage: string, localResults: { command: string; description: string; score: number }[], webResearchText?: string, history?: { role: string; content: string }[]): Promise<{ thinking: string; steps: ThinkingStep[] }> {
+  const messages: any[] = [
+    { role: 'system', content: THINKING_PROMPT },
+    { role: 'system', content: `### Local DB Matches (from our website database):\n${formatLocalResults(localResults)}` },
+  ]
+
+  if (webResearchText) {
+    messages.push({ role: 'system', content: `### Web Research Results (live from internet):\n${webResearchText}` })
+  }
+
+  if (history && history.length > 0) {
+    for (const entry of history) {
+      messages.push({ role: entry.role, content: entry.content })
+    }
+  }
+
+  messages.push({ role: 'user', content: userMessage })
+
+  const thinking = await callGroq(messages, undefined, 2048)
+  if (!thinking) throw new Error('Failed to generate thinking')
+
+  const steps = parseThinkingSteps(thinking)
+  return { thinking, steps }
+}
+
+function parseThinkingSteps(text: string): ThinkingStep[] {
+  const steps: ThinkingStep[] = []
+  const lines = text.split('\n')
+  let currentStep = ''
+  let currentContent: string[] = []
+
+  for (const line of lines) {
+    const headerMatch = line.match(/^(?:ANALYZE|REASON|FORMULATE|Step\s+\d+|1\.|2\.|3\.|4\.|5\.)/i)
+    if (headerMatch) {
+      if (currentStep) {
+        steps.push({ step: currentStep, content: currentContent.join('\n').trim() })
+      }
+      currentStep = line.trim()
+      currentContent = []
+    } else if (line.trim()) {
+      currentContent.push(line)
+    }
+  }
+
+  if (currentStep) {
+    steps.push({ step: currentStep, content: currentContent.join('\n').trim() })
+  }
+
+  if (steps.length === 0) {
+    const paragraphs = text.split('\n\n').filter(p => p.trim())
+    for (let i = 0; i < paragraphs.length; i++) {
+      steps.push({ step: `Step ${i + 1}`, content: paragraphs[i].trim() })
+    }
+  }
+
+  return steps
+}
+
+async function generateResponse(userMessage: string, thinking: string, localResults: { command: string; description: string; score: number }[], webResearchText?: string, history?: { role: string; content: string }[]): Promise<string> {
+  const messages: any[] = [
+    { role: 'system', content: RESPONSE_PROMPT },
+    { role: 'system', content: `### Local DB Matches:\n${formatLocalResults(localResults)}` },
+  ]
+
+  if (webResearchText) {
+    messages.push({ role: 'system', content: `### Live Web Research Data:\n${webResearchText}` })
+  }
+
+  if (history && history.length > 0) {
+    for (const entry of history) {
+      messages.push({ role: entry.role, content: entry.content })
+    }
+  }
+
+  messages.push(
+    { role: 'system', content: `### Your step-by-step reasoning:\n${thinking}` },
+    { role: 'user', content: `Based on your reasoning above, provide your final comprehensive answer to: ${userMessage}` },
+  )
+
+  const reply = await callGroq(messages, undefined, 1536)
+  if (!reply) throw new Error('Failed to generate response')
+  return reply
+}
+
+function extractDuckDuckGoResults(html: string): { title: string; snippet: string; url: string }[] {
+  const results: { title: string; snippet: string; url: string }[] = []
+  const resultBlocks = html.split('<div class="result">')
+
+  for (let i = 1; i < resultBlocks.length; i++) {
+    const block = resultBlocks[i]
+    const urlMatch = block.match(/href="(https?:\/\/[^"]+)"/)
+    const titleMatch = block.match(/<a[^>]*>([^<]+)<\/a>/)
+    const snippetMatch = block.match(/class="result-snippet">([^<]*)<\/span>/)
+
+    if (urlMatch && titleMatch) {
+      results.push({
+        url: urlMatch[1],
+        title: titleMatch[1].trim(),
+        snippet: snippetMatch ? snippetMatch[1].trim() : '',
+      })
+    }
+  }
+
+  return results
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[^;]+;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractRelevantContent(text: string, query: string): string {
+  const lowerText = text.toLowerCase()
+  const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2)
+
+  const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 20)
+
+  const scored = sentences.map(s => {
+    const lower = s.toLowerCase()
+    let score = 0
+    for (const term of queryTerms) {
+      if (lower.includes(term)) score++
+    }
+    return { sentence: s, score }
+  })
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 15)
+    .map(s => s.sentence)
+    .join('. ')
+}
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+const SEARCH_TIMEOUT = 8000
+const PAGE_TIMEOUT = 10000
+
+async function fetchWithTimeout(url: string, timeout: number, headers?: Record<string, string>): Promise<Response | null> {
+  try {
+    const controller = new AbortController()
+    const id = setTimeout(() => controller.abort(), timeout)
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml',
+        ...headers,
+      },
+    })
+    clearTimeout(id)
+    return res
+  } catch {
+    return null
+  }
+}
+
+async function webResearch(query: string): Promise<{
+  found: boolean
+  research: string
+  sources: { title: string; url: string }[]
+}> {
+  const searchQuery = encodeURIComponent(query + ' mainframe z/OS IBM')
+  const sources: { title: string; url: string }[] = []
+  const researchParts: string[] = []
+
+  try {
+    const res = await fetchWithTimeout(
+      `https://lite.duckduckgo.com/lite/?q=${searchQuery}`,
+      SEARCH_TIMEOUT
+    )
+
+    if (!res || !res.ok) {
+      return { found: false, research: '', sources: [] }
+    }
+
+    const html = await res.text()
+    const searchResults = extractDuckDuckGoResults(html)
+
+    if (searchResults.length === 0) {
+      return { found: false, research: '', sources: [] }
+    }
+
+    const topResults = searchResults.slice(0, 3)
+
+    for (const result of topResults) {
+      sources.push({ title: result.title, url: result.url })
+
+      const pageRes = await fetchWithTimeout(result.url, PAGE_TIMEOUT)
+      if (pageRes && pageRes.ok) {
+        const pageHtml = await pageRes.text()
+        const cleanText = stripHtml(pageHtml)
+        const relevant = extractRelevantContent(cleanText, query)
+
+        if (relevant.length > 50) {
+          researchParts.push(`From: ${result.title} (${result.url})\n${relevant}`)
+        } else if (result.snippet) {
+          researchParts.push(`From: ${result.title} (${result.url})\n${result.snippet}`)
+        }
+      } else if (result.snippet) {
+        researchParts.push(`From: ${result.title} (${result.url})\n${result.snippet}`)
+      }
+    }
+
+    if (researchParts.length === 0) {
+      return { found: false, research: '', sources: [] }
+    }
+
+    return {
+      found: true,
+      research: researchParts.join('\n\n---\n\n'),
+      sources,
+    }
+  } catch {
+    return { found: false, research: '', sources: [] }
+  }
 }
 
 function readBody(req: any): Promise<string> {
@@ -749,22 +996,39 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = await readBody(req)
-    const { message } = JSON.parse(body)
+    const { message, history: rawHistory } = JSON.parse(body)
 
     if (!message || typeof message !== 'string') {
       return json(res, 400, { error: 'Message is required' })
     }
 
+    const history = (Array.isArray(rawHistory) ? rawHistory : []).filter(
+      (m: any) => m.role === 'user' || m.role === 'assistant'
+    ).slice(-10) as { role: string; content: string }[]
+
     const mainframeQuery = message.trim().endsWith('?') ? message.trim().slice(0, -1) + ' in mainframe?' : message.trim() + ' in mainframe'
 
     const relevance = await checkRelevance(message)
     if (relevance === 'irrelevant') {
-      return json(res, 200, { reply: 'I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics.')
+      return json(res, 200, { reply: 'I only answer mainframe-related questions. Please ask about IBM z/OS, JCL, COBOL, CICS, console commands, or other mainframe topics.' })
     }
 
     const localResults = searchLocalDB(mainframeQuery)
-    const reply = await queryGroq(mainframeQuery, localResults)
-    return json(res, 200, { reply, localMatches: localResults.length })
+
+    const { found: webFound, research: webResearchText, sources: webSources } = await webResearch(mainframeQuery)
+
+    const { thinking, steps } = await generateThinking(mainframeQuery, localResults, webFound ? webResearchText : undefined, history)
+
+    const reply = await generateResponse(mainframeQuery, thinking, localResults, webFound ? webResearchText : undefined, history)
+
+    return json(res, 200, {
+      reply,
+      thinking,
+      thinkingSteps: steps,
+      localMatches: localResults.length,
+      webSources: webFound ? webSources : undefined,
+      webResearch: webFound ? true : false,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('Chat error:', msg)
